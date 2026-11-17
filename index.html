@@ -1,1 +1,332 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Extreme Balancer 3D</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a2a3a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        #ui {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            color: white;
+            font-size: 28px;
+            letter-spacing: 5px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        #message {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 25px 40px;
+            border-radius: 15px;
+            text-align: center;
+            font-size: 24px;
+            display: none;
+            z-index: 20;
+            border: 2px solid #f39c12;
+        }
+        #message button {
+            margin-top: 15px;
+            padding: 10px 25px;
+            font-size: 18px;
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        /* मोबाइल और माउस कंट्रोल बटन (स्क्रीनशॉट की तरह) */
+        .controls-left {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+        }
+        .controls-right {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            display: flex;
+            gap: 15px;
+            z-index: 10;
+        }
+        .btn {
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: 3px solid rgba(255, 255, 255, 0.7);
+            color: white;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+        }
+        .btn:active {
+            background: rgba(255, 255, 255, 0.5);
+            transform: scale(0.95);
+        }
+    </style>
+    <!-- Three.js 3D लाइब्रेरी -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">❤️❤️❤️❤️❤️</div>
+    <div id="message">
+        <div id="msg-text">गेम ओवर!</div>
+        <button onclick="resetGame()">फिर से खेलें</button>
+    </div>
+
+    <!-- ऑन-स्क्रीन कंट्रोल बटन -->
+    <div class="controls-left">
+        <div class="btn" id="btn-up">▲</div>
+        <div class="btn" id="btn-down">▼</div>
+    </div>
+    <div class="controls-right">
+        <div class="btn" id="btn-left">◀</div>
+        <div class="btn" id="btn-right">▶</div>
+    </div>
+
+    <script>
+        // 1. सीन, कैमरा और रेंडरर सेटअप
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2c3e50);
+        scene.fog = new THREE.Fog(0x2c3e50, 15, 65);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // 2. लाइटिंग (रोशनी)
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfffaed, 0.9);
+        dirLight.position.set(10, 25, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // 3. नीचे का पानी (Water)
+        const waterGeo = new THREE.PlaneGeometry(300, 300);
+        const waterMat = new THREE.MeshStandardMaterial({ color: 0x16384c, roughness: 0.2, metalness: 0.6 });
+        const water = new THREE.Mesh(waterGeo, waterMat);
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = -4;
+        scene.add(water);
+
+        // 4. खिलाड़ी की लकड़ी की गेंद (Ball)
+        const ballRadius = 0.6;
+        const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+        const ballMat = new THREE.MeshStandardMaterial({ color: 0xd38b47, roughness: 0.4, metalness: 0.2 });
+        const ball = new THREE.Mesh(ballGeo, ballMat);
+        ball.castShadow = true;
+        scene.add(ball);
+
+        // 5. पुल (Bridge) और खतरनाक ब्लेड (Obstacles) बनाना
+        const platforms = [];
+        const blades = [];
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x7c5332, roughness: 0.8 });
+        const bladeMat = new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 });
+
+        function createPlatform(x, y, z, w, h, d) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, woodMat);
+            mesh.position.set(x, y, z);
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            platforms.push({ mesh, minX: x - w/2, maxX: x + w/2, minZ: z - d/2, maxZ: z + d/2, topY: y + h/2 });
+        }
+
+        function createBlade(x, y, z) {
+            const geo = new THREE.BoxGeometry(3.2, 0.2, 0.6);
+            const mesh = new THREE.Mesh(geo, bladeMat);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            blades.push(mesh);
+        }
+
+        // लेवल का नक्शा (सीधा पुल, मोड़ और ब्लेड)
+        createPlatform(0, 0, -5, 3.5, 0.4, 16);     // शुरुआती पुल
+        createBlade(0, 0.4, -7);                   // पहला घूमता ब्लेड
+        createPlatform(2.5, 0, -16, 8.5, 0.4, 3.5); // दायां मोड़
+        createPlatform(5, 0, -25, 3.2, 0.4, 16);   // आगे का पतला पुल
+        createBlade(5, 0.4, -24);                  // दूसरा ब्लेड
+        createBlade(5, 0.4, -29);                  // तीसरा ब्लेड
+
+        // फिनिश पॉइंट (नाव / मंजिल)
+        const finishGeo = new THREE.BoxGeometry(5, 0.6, 5);
+        const finishMat = new THREE.MeshStandardMaterial({ color: 0x27ae60 });
+        const finishBox = new THREE.Mesh(finishGeo, finishMat);
+        finishBox.position.set(5, 0, -36);
+        scene.add(finishBox);
+        platforms.push({ mesh: finishBox, minX: 2.5, maxX: 7.5, minZ: -38.5, maxZ: -33.5, topY: 0.3, isFinish: true });
+
+        // 6. गेम फिजिक्स और वेरिएबल्स
+        let lives = 5;
+        let velocity = { x: 0, y: 0, z: 0 };
+        const accel = 0.015;
+        const friction = 0.94;
+        let isGameOver = false;
+
+        const keys = { up: false, down: false, left: false, right: false };
+
+        function respawnBall() {
+            ball.position.set(0, 1.5, 0);
+            velocity = { x: 0, y: 0, z: 0 };
+        }
+        respawnBall();
+
+        function updateLivesUI() {
+            document.getElementById('ui').innerText = '❤️'.repeat(lives) + '🖤'.repeat(5 - lives);
+        }
+
+        function showMessage(text) {
+            isGameOver = true;
+            document.getElementById('msg-text').innerText = text;
+            document.getElementById('message').style.display = 'block';
+        }
+
+        function resetGame() {
+            lives = 5;
+            isGameOver = false;
+            updateLivesUI();
+            document.getElementById('message').style.display = 'none';
+            respawnBall();
+        }
+
+        // 7. कीबोर्ड और टच कंट्रोल
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w') keys.up = true;
+            if (e.key === 'ArrowDown' || e.key === 's') keys.down = true;
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w') keys.up = false;
+            if (e.key === 'ArrowDown' || e.key === 's') keys.down = false;
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+        });
+
+        function bindBtn(id, keyName) {
+            const el = document.getElementById(id);
+            el.addEventListener('mousedown', () => keys[keyName] = true);
+            el.addEventListener('mouseup', () => keys[keyName] = false);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+        }
+        bindBtn('btn-up', 'up');
+        bindBtn('btn-down', 'down');
+        bindBtn('btn-left', 'left');
+        bindBtn('btn-right', 'right');
+
+        // 8. मुख्य गेम लूप (Animation & Physics)
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // ब्लेड घुमाना
+            blades.forEach((b, idx) => {
+                b.rotation.y += (idx % 2 === 0 ? 0.05 : -0.05);
+            });
+
+            if (!isGameOver) {
+                // गेंद की गति (Movement)
+                if (keys.up) velocity.z -= accel;
+                if (keys.down) velocity.z += accel;
+                if (keys.left) velocity.x -= accel;
+                if (keys.right) velocity.x += accel;
+
+                velocity.x *= friction;
+                velocity.z *= friction;
+
+                ball.position.x += velocity.x;
+                ball.position.z += velocity.z;
+
+                // गेंद को लुढ़कते हुए दिखाना (Rotation)
+                ball.rotation.x += velocity.z * 1.5;
+                ball.rotation.z -= velocity.x * 1.5;
+
+                // चेक करें कि गेंद पुल पर है या हवा में
+                let onPlatform = false;
+                for (let p of platforms) {
+                    if (ball.position.x >= p.minX - 0.3 && ball.position.x <= p.maxX + 0.3 &&
+                        ball.position.z >= p.minZ - 0.3 && ball.position.z <= p.maxZ + 0.3 &&
+                        ball.position.y >= p.topY + ballRadius - 0.2) {
+                        onPlatform = true;
+                        ball.position.y = p.topY + ballRadius;
+                        velocity.y = 0;
+
+                        if (p.isFinish) {
+                            showMessage("🎉 बधाई हो! आपने लेवल पार कर लिया!");
+                        }
+                        break;
+                    }
+                }
+
+                // अगर पुल से बाहर गई तो गुरुत्वाकर्षण (Gravity) से नीचे गिरेगी
+                if (!onPlatform) {
+                    velocity.y -= 0.015;
+                    ball.position.y += velocity.y;
+                }
+
+                // घूमते ब्लेड से टक्कर चेक करना
+                for (let b of blades) {
+                    if (ball.position.distanceTo(b.position) < 1.3) {
+                        loseLife();
+                    }
+                }
+
+                // पानी में गिरने पर
+                if (ball.position.y < -3.5) {
+                    loseLife();
+                }
+            }
+
+            // कैमरा गेंद के पीछे चलेगा
+            camera.position.lerp(new THREE.Vector3(ball.position.x, ball.position.y + 4.5, ball.position.z + 6.5), 0.1);
+            camera.lookAt(ball.position.x, ball.position.y, ball.position.z - 2);
+
+            renderer.render(scene, camera);
+        }
+
+        function loseLife() {
+            lives--;
+            updateLivesUI();
+            if (lives <= 0) {
+                showMessage("💀 सारी लाइफ खत्म! गेम ओवर");
+            } else {
+                respawnBall();
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
 
