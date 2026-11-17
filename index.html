@@ -1,1 +1,444 @@
 
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TKX STREET RACING</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#071018;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#hud{position:absolute;top:0;left:0;width:100%;padding:15px;display:flex;justify-content:space-between;pointer-events:none;color:white;z-index:2}
+.panel{background:#08131dcc;border:1px solid #ffffff25;border-radius:13px;padding:9px 14px;box-shadow:0 5px 20px #0005}
+.small{font-size:10px;color:#9db2c5;letter-spacing:2px}
+.big{font-size:22px;font-weight:900;margin-top:3px}
+#speed{color:#6df7ce}
+#controls{position:absolute;bottom:22px;left:0;width:100%;display:flex;justify-content:space-between;padding:0 20px;z-index:3}
+.controlGroup{display:flex;gap:12px;align-items:end}
+.control{width:68px;height:68px;border-radius:20px;border:1px solid #ffffff55;background:#102535dd;color:white;font-size:28px;font-weight:bold;box-shadow:0 5px 15px #0008;touch-action:none}
+.control:active{background:#16b98b;transform:scale(.94)}
+#nitro{width:75px;height:75px;border-radius:50%;background:linear-gradient(145deg,#ffb12b,#ef4c21);font-size:14px;border:3px solid #ffffff88;color:white;font-weight:900}
+#overlay{position:absolute;inset:0;background:linear-gradient(#06101bdc,#07131eee);display:flex;align-items:center;justify-content:center;z-index:5;padding:24px}
+#box{width:min(390px,100%);text-align:center;color:white;background:#102333eF;border:1px solid #ffffff30;border-radius:25px;padding:28px 22px;box-shadow:0 20px 70px #0009}
+.logo{font-size:13px;letter-spacing:6px;color:#6df7ce;font-weight:bold}
+h1{font-size:36px;line-height:1.05;margin:14px 0 8px;font-style:italic}
+#message{color:#b5c6d3;font-size:14px;line-height:1.7;margin:14px 0 22px}
+#start{width:100%;border:0;border-radius:13px;padding:16px;background:linear-gradient(90deg,#19c99b,#0c9eaf);color:#041b1a;font-size:17px;font-weight:900}
+.note{font-size:11px;color:#8ba1b2;margin-top:16px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="panel">
+    <div class="small">DISTANCE</div>
+    <div class="big"><span id="score">0</span> m</div>
+  </div>
+  <div class="panel" style="text-align:right">
+    <div class="small">SPEED</div>
+    <div class="big" id="speed">0 KM/H</div>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="controlGroup">
+    <button class="control" id="left">◀</button>
+    <button class="control" id="right">▶</button>
+  </div>
+  <button class="control" id="nitro">NITRO</button>
+</div>
+
+<div id="overlay">
+  <div id="box">
+    <div class="logo">TKX GAMES PRESENTS</div>
+    <h1>STREET<br>RACING</h1>
+    <div id="message">
+      अपनी कार चलाओ और दूसरी कारों से बचो।<br>
+      जितनी दूर जाओगे, उतना स्कोर बढ़ेगा।<br><br>
+      ◀ ▶ कार मोड़ने के लिए<br>
+      NITRO तेज़ गति के लिए
+    </div>
+    <button id="start">START RACE</button>
+    <div class="note">MADE FOR RACING FANS • TKX</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const speedEl = document.getElementById("speed");
+const overlay = document.getElementById("overlay");
+const startBtn = document.getElementById("start");
+const message = document.getElementById("message");
+
+let W=0,H=0,dpr=1;
+let running=false, gameOver=false;
+let playerX=0, playerY=0;
+let roadOffset=0;
+let distance=0;
+let speed=280;
+let spawnTimer=0;
+let traffic=[];
+let particles=[];
+let coins=[];
+let leftPressed=false,rightPressed=false,nitroPressed=false;
+let lastTime=0;
+
+function resize(){
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  W=window.innerWidth;
+  H=window.innerHeight;
+  canvas.width=Math.floor(W*dpr);
+  canvas.height=Math.floor(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  playerY=H*.76;
+  if(!playerX) playerX=W/2;
+}
+window.addEventListener("resize",resize);
+resize();
+
+function road(){
+  return {left:W/2-Math.min(W*.43,215),width:Math.min(W*.86,430)};
+}
+function laneX(lane){
+  const r=road();
+  return r.left+r.width*(lane+.5)/3;
+}
+function roundedRect(x,y,w,h,r,color){
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,r);
+  ctx.fill();
+}
+
+function drawBackground(){
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#102b32");
+  sky.addColorStop(1,"#07141b");
+  ctx.fillStyle=sky;
+  ctx.fillRect(0,0,W,H);
+
+  const r=road();
+  ctx.fillStyle="#173c2d";
+  ctx.fillRect(0,0,r.left,H);
+  ctx.fillRect(r.left+r.width,0,W-r.left-r.width,H);
+
+  // सड़क के किनारे पेड़
+  for(let i=0;i<13;i++){
+    let y=((i*105+roadOffset*.8)%(H+100))-60;
+    for(let side of [-1,1]){
+      let x=side===-1?r.left-24:r.left+r.width+24;
+      ctx.fillStyle="#09251c";
+      ctx.beginPath();
+      ctx.arc(x,y,19,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle="#286b42";
+      ctx.beginPath();
+      ctx.arc(x-4,y-4,14,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle="#4c9860";
+      ctx.beginPath();
+      ctx.arc(x-7,y-9,5,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // सड़क
+  ctx.fillStyle="#252c35";
+  ctx.fillRect(r.left,0,r.width,H);
+
+  // सड़क की चमकदार सीमाएँ
+  ctx.fillStyle="#d6e2dd";
+  ctx.fillRect(r.left,0,5,H);
+  ctx.fillRect(r.left+r.width-5,0,5,H);
+  ctx.fillStyle="#14cba0";
+  ctx.fillRect(r.left+5,0,2,H);
+  ctx.fillRect(r.left+r.width-7,0,2,H);
+
+  // लेन की सफेद लाइनें
+  for(let lane=1;lane<3;lane++){
+    let x=r.left+r.width*lane/3;
+    for(let y=-65+(roadOffset%100);y<H;y+=100){
+      ctx.fillStyle="#9ca9b1";
+      ctx.fillRect(x-2,y,4,49);
+    }
+  }
+
+  // सड़क पर हल्की रोशनी
+  const glow=ctx.createLinearGradient(r.left,0,r.left+r.width,0);
+  glow.addColorStop(0,"#ffffff00");
+  glow.addColorStop(.5,"#ffffff0b");
+  glow.addColorStop(1,"#ffffff00");
+  ctx.fillStyle=glow;
+  ctx.fillRect(r.left,0,r.width,H);
+}
+
+function drawCar(x,y,color,isPlayer=false){
+  const w=isPlayer?48:46;
+  const h=isPlayer?88:82;
+
+  ctx.save();
+  ctx.translate(x,y);
+
+  // छाया
+  ctx.fillStyle="#0008";
+  ctx.beginPath();
+  ctx.ellipse(3,8,w*.65,h*.53,0,0,Math.PI*2);
+  ctx.fill();
+
+  // पहिए
+  roundedRect(-w/2-4,-h*.32,8,22,3,"#080c10");
+  roundedRect(w/2-4,-h*.32,8,22,3,"#080c10");
+  roundedRect(-w/2-4,h*.13,8,22,3,"#080c10");
+  roundedRect(w/2-4,h*.13,8,22,3,"#080c10");
+
+  // कार का मुख्य हिस्सा
+  const body=ctx.createLinearGradient(-w/2,0,w/2,0);
+  body.addColorStop(0,"#111820");
+  body.addColorStop(.22,color);
+  body.addColorStop(.75,color);
+  body.addColorStop(1,"#111820");
+  roundedRect(-w/2,-h/2,w,h,12,body);
+
+  // ऊपर का हिस्सा
+  roundedRect(-w*.34,-h*.24,w*.68,h*.48,10,"#182d3c");
+
+  // शीशा
+  const glass=ctx.createLinearGradient(0,-h*.2,0,h*.2);
+  glass.addColorStop(0,"#9fe8f5");
+  glass.addColorStop(.5,"#315c70");
+  glass.addColorStop(1,"#122936");
+  roundedRect(-w*.29,-h*.19,w*.58,h*.22,6,glass);
+  roundedRect(-w*.29,h*.04,w*.58,h*.13,5,"#193b4b");
+
+  // बोनट की चमक
+  ctx.fillStyle="#ffffff35";
+  ctx.fillRect(-w*.3,-h*.42,w*.6,3);
+
+  // लाइट
+  roundedRect(-w*.37,-h*.46,12,6,3,isPlayer?"#c8fff2":"#ff4848");
+  roundedRect(w*.37-12,-h*.46,12,6,3,isPlayer?"#c8fff2":"#ff4848");
+
+  if(isPlayer){
+    ctx.fillStyle="#ffffff";
+    ctx.font="bold 8px Arial";
+    ctx.textAlign="center";
+    ctx.fillText("TKX",0,2);
+  }else{
+    roundedRect(-w*.32,h*.36,w*.64,5,2,"#ff3030");
+  }
+  ctx.restore();
+}
+
+function drawCoin(c){
+  ctx.save();
+  ctx.translate(c.x,c.y);
+  ctx.fillStyle="#ffbd31";
+  ctx.beginPath();
+  ctx.arc(0,0,11,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle="#fff0a0";
+  ctx.lineWidth=3;
+  ctx.stroke();
+  ctx.fillStyle="#7b4700";
+  ctx.font="bold 12px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText("$",0,1);
+  ctx.restore();
+}
+
+function drawParticles(){
+  for(const p of particles){
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+function draw(){
+  drawBackground();
+
+  for(const c of coins) drawCoin(c);
+  for(const car of traffic) drawCar(car.x,car.y,car.color,false);
+
+  // नाइट्रो की आग
+  if(nitroPressed && running){
+    ctx.fillStyle="#36d9ff";
+    ctx.beginPath();
+    ctx.moveTo(playerX-10,playerY+38);
+    ctx.lineTo(playerX,playerY+72+Math.random()*12);
+    ctx.lineTo(playerX+10,playerY+38);
+    ctx.fill();
+  }
+
+  drawCar(playerX,playerY,"#12d9a2",true);
+  drawParticles();
+}
+
+function spawnTraffic(){
+  const lane=Math.floor(Math.random()*3);
+  const colors=["#ef5350","#e5a52d","#8d7bff","#e9edf2","#25a7e5"];
+  traffic.push({
+    x:laneX(lane),
+    y:-100,
+    color:colors[Math.floor(Math.random()*colors.length)],
+    speed:Math.random()*75+65,
+    w:46,h:82
+  });
+}
+
+function spawnCoin(){
+  const lane=Math.floor(Math.random()*3);
+  coins.push({x:laneX(lane),y:-40});
+}
+
+function hit(a,b){
+  return Math.abs(a.x-b.x)<34 && Math.abs(a.y-b.y)<65;
+}
+
+function endGame(){
+  running=false;
+  gameOver=true;
+  overlay.classList.remove("hidden");
+  document.querySelector("h1").innerHTML="RACE<br>OVER";
+  message.innerHTML="तुम्हारा स्कोर: <b>"+Math.floor(distance)+" मीटर</b><br><br>फिर से कोशिश करो और अपना रिकॉर्ड बनाओ!";
+  startBtn.textContent="RACE AGAIN";
+}
+
+function resetGame(){
+  traffic=[];
+  coins=[];
+  particles=[];
+  distance=0;
+  speed=280;
+  spawnTimer=0;
+  roadOffset=0;
+  playerX=W/2;
+  playerY=H*.76;
+  leftPressed=false;
+  rightPressed=false;
+  nitroPressed=false;
+  gameOver=false;
+  running=true;
+  overlay.classList.add("hidden");
+  document.querySelector("h1").innerHTML="STREET<br>RACING";
+  message.innerHTML="अपनी कार चलाओ और दूसरी कारों से बचो।";
+  lastTime=performance.now();
+}
+
+function update(dt){
+  if(!running)return;
+
+  const r=road();
+  const boost=nitroPressed?1.55:1;
+  speed=Math.min(650,280+distance*.35);
+  let currentSpeed=speed*boost;
+
+  if(leftPressed) playerX-=300*dt;
+  if(rightPressed) playerX+=300*dt;
+
+  const minX=r.left+30;
+  const maxX=r.left+r.width-30;
+  playerX=Math.max(minX,Math.min(maxX,playerX));
+
+  roadOffset+=currentSpeed*dt;
+  distance+=currentSpeed*dt*.035;
+
+  spawnTimer+=dt;
+  const interval=Math.max(.48,1.05-distance/1500);
+  if(spawnTimer>interval){
+    spawnTraffic();
+    if(Math.random()<.48)spawnCoin();
+    spawnTimer=0;
+  }
+
+  for(const car of traffic){
+    car.y+=(currentSpeed*.75+car.speed)*dt;
+    if(hit({x:playerX,y:playerY},car)){
+      endGame();
+      return;
+    }
+  }
+  traffic=traffic.filter(c=>c.y<H+120);
+
+  for(const c of coins){
+    c.y+=currentSpeed*dt;
+    if(Math.abs(c.x-playerX)<35 && Math.abs(c.y-playerY)<55){
+      c.collected=true;
+      distance+=25;
+      for(let i=0;i<9;i++){
+        particles.push({
+          x:c.x,y:c.y,
+          vx:(Math.random()-.5)*100,
+          vy:(Math.random()-.5)*100,
+          life:1,size:Math.random()*4+2,
+          color:"#ffd45c"
+        });
+      }
+    }
+  }
+  coins=coins.filter(c=>c.y<H+30&&!c.collected);
+
+  for(const p of particles){
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    p.life-=dt*1.8;
+  }
+  particles=particles.filter(p=>p.life>0);
+
+  scoreEl.textContent=Math.floor(distance);
+  speedEl.textContent=Math.floor(currentSpeed*.55)+" KM/H";
+}
+
+function loop(time){
+  const dt=Math.min((time-lastTime)/1000||0,.04);
+  lastTime=time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener("click",resetGame);
+
+function holdButton(id,down,up){
+  const el=document.getElementById(id);
+  el.addEventListener("pointerdown",e=>{
+    e.preventDefault();
+    down();
+  });
+  ["pointerup","pointercancel","pointerleave"].forEach(event=>{
+    el.addEventListener(event,e=>{
+      e.preventDefault();
+      up();
+    });
+  });
+}
+holdButton("left",()=>leftPressed=true,()=>leftPressed=false);
+holdButton("right",()=>rightPressed=true,()=>rightPressed=false);
+holdButton("nitro",()=>nitroPressed=true,()=>nitroPressed=false);
+
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a")leftPressed=true;
+  if(e.key==="ArrowRight"||e.key==="d")rightPressed=true;
+  if(e.key===" "||e.key==="ArrowUp")nitroPressed=true;
+});
+window.addEventListener("keyup",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a")leftPressed=false;
+  if(e.key==="ArrowRight"||e.key==="d")rightPressed=false;
+  if(e.key===" "||e.key==="ArrowUp")nitroPressed=false;
+});
+
+playerX=W/2;
+requestAnimationFrame(loop);
+</script>
+</body>
+  </html>
+
